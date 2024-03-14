@@ -55,17 +55,9 @@ def make_lognormal_power_map(power_map, shift, zero_freq_val=0.0):
 
 
 # @jax.jit
-def Pk_fn_ia(k, cosmo, a_ai):
+def Pk_fn(k, cosmo, a_ai):
     pz = jc.redshift.smail_nz(0.5, 2.0, 1.0)
-    tracer = jc.probes.WeakLensing([pz], ia_bias=jc.bias.constant_linear_bias(a_ai))
-    ell_tab = jnp.logspace(0, 4.5, 128)
-    cell_tab = jc.angular_cl.angular_cl(cosmo, ell_tab, [tracer])[0]
-    return jc.scipy.interpolate.interp(k.flatten(), ell_tab, cell_tab).reshape(k.shape)
-
-
-def Pk_fn(k, cosmo):
-    pz = jc.redshift.smail_nz(0.5, 2.0, 1.0)
-    tracer = jc.probes.WeakLensing([pz])
+    tracer = jc.probes.WeakLensing([pz], ia_bias=a_ai)
     ell_tab = jnp.logspace(0, 4.5, 128)
     cell_tab = jc.angular_cl.angular_cl(cosmo, ell_tab, [tracer])[0]
     return jc.scipy.interpolate.interp(k.flatten(), ell_tab, cell_tab).reshape(k.shape)
@@ -98,11 +90,13 @@ def lensingLogNormal(
     cosmo = jc.Planck15(Omega_c=theta[0], sigma8=theta[1])
 
     if with_ia:
-        P_ia = partial(Pk_fn_ia, cosmo=cosmo, a_ai=ia)
-        power_map = make_power_map(P_ia, N, map_size)
+        ia_bias = jc.bias.constant_linear_bias(ia)
+
     else:
-        P = partial(Pk_fn, cosmo=cosmo)
-        power_map = make_power_map(P, N, map_size)
+        ia_bias = None
+
+    P = partial(Pk_fn, cosmo=cosmo, a_ai=ia_bias)
+    power_map = make_power_map(P, N, map_size)
 
     if model_type == "lognormal":
         # Compute the shift parameter as a function of cosmology
