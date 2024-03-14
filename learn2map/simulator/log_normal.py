@@ -76,7 +76,8 @@ def lensingLogNormal(
     map_size=5,  # map size in deg.
     gal_per_arcmin2=10,
     sigma_e=0.26,  # shape noise
-    model_type="lognormal",  # either 'lognormal' or 'gaussian', 
+    model_type="lognormal",  # either 'lognormal' or 'gaussian',
+    with_ia=True,
 ):
     pix_area = (map_size * 60 / N) ** 2  # arcmin2
     map_size = map_size / 180 * jnp.pi  # radians
@@ -89,32 +90,27 @@ def lensingLogNormal(
     # Sampling ia
     ia = numpyro.sample("ia", dist.Normal(0, 1))
 
-    cosmo = jc.Planck15(Omega_c=theta[0], sigma8=theta[1])
-
-    # Creating a given redshift distributio
-    P_ia = partial(Pk_fn_ia, cosmo=cosmo, a_ai=ia) 
-    P = partial(Pk_fn, cosmo=cosmo)
-
     # Sampling latent variables
     z = numpyro.sample(
         "z", dist.MultivariateNormal(loc=jnp.zeros((N, N)), precision_matrix=jnp.eye(N))
     )
 
-    # (just to get the corresponding gaussian map)
-    power_map = make_power_map(P, N, map_size)
-    field = jnp.fft.ifft2(jnp.fft.fft2(z) * jnp.sqrt(power_map)).real
-    numpyro.deterministic("z_ps", field)
+    cosmo = jc.Planck15(Omega_c=theta[0], sigma8=theta[1])
 
-    power_map_ia = make_power_map(P_ia, N, map_size)
+    if with_ia:
+        P_ia = partial(Pk_fn_ia, cosmo=cosmo, a_ai=ia)
+        power_map = make_power_map(P_ia, N, map_size)
+    else:
+        P = partial(Pk_fn, cosmo=cosmo)
+        power_map = make_power_map(P, N, map_size)
 
     if model_type == "lognormal":
         # Compute the shift parameter as a function of cosmology
         shift = shift_fn(cosmo.Omega_m, theta[1])
-        power_map = make_lognormal_power_map(power_map_ia, shift)
+        power_map = make_lognormal_power_map(power_map, shift)
 
     # Convolving by the power spectrum
-    field = jnp.fft.ifft2(jnp.fft.fft2(z) * jnp.sqrt(power_map_ia)).real
-    numpyro.deterministic("z_ps_lognormal", field)
+    field = jnp.fft.ifft2(jnp.fft.fft2(z) * jnp.sqrt(power_map)).real
 
     if model_type == "lognormal":
         field = shift * (jnp.exp(field - jnp.var(field) / 2) - 1)
