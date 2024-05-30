@@ -36,14 +36,14 @@ np.complex = complex
 
 # script arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--total_steps", type=int, default=60_000)
+parser.add_argument("--total_steps", type=int, default=50_000)
 parser.add_argument("--lr_rate", type=float, default=1e-2)
 
 
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new4"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new6"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -105,11 +105,12 @@ print("######## DEFINING LATENT ANALYTICAL MODEL ########")
 from jax_cosmo.redshift import redshift_distribution
 from jax.tree_util import register_pytree_node_class
 
+
 @register_pytree_node_class
 class smail_nz2(redshift_distribution):
     def pz_fn(self, z):
         a, b, z0 = self.params
-        return z**a * jnp.exp(-((z / z0) ** b))*4
+        return z**a * jnp.exp(-((z / z0) ** b)) * 4
 
 
 filename = "/gpfsdswork/dataset/CosmoGridV1/CosmoGridV1_metainfo.h5"
@@ -271,42 +272,15 @@ class UResNetEncoder(UResNet):
             name=name,
         )
 
-class UResNetDecoder(UResNet):
-    """ResNet18."""
 
-    def __init__(
-        self,
-        bn_config: Mapping[str, float] | None = None,
-        use_bn: bool = None,
-        pad_crop: bool = False,
-        n_output_channels: int = 1,
-        name: str | None = None,
-    ):
-        """Constructs a ResNet model.
-        Args:
-          bn_config: A dictionary of two elements, ``decay_rate`` and ``eps`` to be
-            passed on to the :class:`~haiku.BatchNorm` layers.
-          resnet_v2: Whether to use the v1 or v2 ResNet implementation. Defaults
-            to ``False``.
-          use_bn: Whether the network should use batch normalisation. Defaults to
-            ``True``.
-          n_output_channels: The number of output channels, for example to change in
-            the case of a complex denoising. Defaults to 1.
-          name: Name of the module.
-        """
-        super().__init__(
-            blocks_per_group=(1,),
-            bn_config=bn_config,
-            bottleneck=False,
-            channels_per_group=(4,),
-            use_projection=(True,),
-            strides=(1,),
-            use_bn=use_bn,
-            pad_crop=pad_crop,
-            n_output_channels=n_output_channels,
-            name=name,
-        )
+class ConvDecoder(hk.Module):
+    def __init__(self, output_dim):
+        super().__init__()
+        self.output_dim = output_dim
 
+    def __call__(self, x):
+        residual = hk.Conv2D(1, 3, 1)(x)
+        return (residual + x).squeeze()
 
 
 # define decoder and encoder
@@ -332,16 +306,12 @@ params_encoder, state_encoder = encoder.init(
 
 decoder = hk.without_apply_rng(
     hk.transform_with_state(
-        lambda z: UResNetDecoder(n_output_channels=1, name="decoder")(
-            z.reshape([-1, N, N, 1]), condition=None, is_training=True
-        )
+        lambda z: ConvDecoder(output_dim=1)(z.reshape([-1, N, N, 1]))
     )
 )
 decoder_eval = hk.without_apply_rng(
     hk.transform_with_state(
-        lambda z: UResNetDecoder(n_output_channels=1, name="decoder")(
-            z.reshape([-1, N, N, 1]), condition=None, is_training=False
-        )
+        lambda z: ConvDecoder(output_dim=1)(z.reshape([-1, N, N, 1]))
     )
 )
 params_decoder, state_decoder = decoder.init(
@@ -467,11 +437,11 @@ for batch in tqdm(range(1, args.total_steps)):
     b_loss, vae_params, opt_state, state, logp = update(
         vae_params, opt_state, state, x, rng, 1
     )
-    
+
     if jnp.isnan(b_loss):
-            print("NaN Loss")
-            break
-            
+        print("NaN Loss")
+        break
+
     store_loss.append(b_loss)
     store_logp_z.append(logp[1])
     store_logp_x.append(logp[0])
@@ -500,12 +470,12 @@ for batch in tqdm(range(1, args.total_steps)):
         plt.savefig(f"./fig/{PATH_experiment}/loss_vae")
 
         plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_z[1000:]),axis =1))
+        plt.plot(jnp.mean(jnp.array(store_logp_z[1000:]), axis=1))
         plt.title("logp_z")
         plt.savefig(f"./fig/{PATH_experiment}/loss_dkl")
 
         plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_x[1000:]),axis =1))
+        plt.plot(jnp.mean(jnp.array(store_logp_x[1000:]), axis=1))
         plt.title("logp_x")
         plt.savefig(f"./fig/{PATH_experiment}/loss_likelihood")
 
@@ -515,12 +485,12 @@ for batch in tqdm(range(1, args.total_steps)):
         plt.savefig(f"./fig/{PATH_experiment}/zoomloss_vae")
 
         plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_z[int(batch - 2000) :]), axis = 1))
+        plt.plot(jnp.mean(jnp.array(store_logp_z[int(batch - 2000) :]), axis=1))
         plt.title("zoom logp_z")
         plt.savefig(f"./fig/{PATH_experiment}/zoomloss_dkl")
 
         plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_x[int(batch - 2000) :]), axis = 1))
+        plt.plot(jnp.mean(jnp.array(store_logp_x[int(batch - 2000) :]), axis=1))
         plt.title("zoom logp_x")
         plt.savefig(f"./fig/{PATH_experiment}/zoomloss_likelihood")
 
@@ -572,12 +542,14 @@ for batch in tqdm(range(1, args.total_steps)):
 
         kmap_lt_true = ConvergenceMap(m_data_proj.squeeze(), angle=map_size * u.deg)
         l2, Pl2 = kmap_lt_true.powerSpectrum(l_edges_kmap)
-        
+
         plt.figure()
         plt.loglog(l1, Pl1, label="Predicted power spectrum")
         plt.loglog(l2, Pl2, "--", label="True power spectrum")
         plt.legend()
-        plt.savefig(f"./fig/{PATH_experiment}/powerspectrum_learning_without_noise_{batch}")
+        plt.savefig(
+            f"./fig/{PATH_experiment}/powerspectrum_learning_without_noise_{batch}"
+        )
 
         plt.figure(figsize=(15, 5))
         plt.subplot(131)
@@ -602,12 +574,14 @@ for batch in tqdm(range(1, args.total_steps)):
             m_data_proj_noisy.squeeze(), angle=map_size * u.deg
         )
         l2, Pl2 = kmap_lt_true.powerSpectrum(l_edges_kmap)
-        
+
         plt.figure()
         plt.loglog(l1, Pl1, label="Predicted power spectrum")
         plt.loglog(l2, Pl2, "--", label="True power spectrum")
         plt.legend()
-        plt.savefig(f"./fig/{PATH_experiment}/powerspectrum_learning_with_noise_{batch}")
+        plt.savefig(
+            f"./fig/{PATH_experiment}/powerspectrum_learning_with_noise_{batch}"
+        )
 
 
 # save params
