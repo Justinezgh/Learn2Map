@@ -36,14 +36,14 @@ np.complex = complex
 
 # script arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--total_steps", type=int, default=50_000)
+parser.add_argument("--total_steps", type=int, default=20_000)
 parser.add_argument("--lr_rate", type=float, default=1e-2)
 
 
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new25"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new27"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -235,41 +235,51 @@ print("######## CREATE VAE ########")
 
 
 # Unet from Benjamin Remy
-class UResNetEncoder(UResNet):
-    """ResNet18."""
+# class UResNetEncoder(UResNet):
+#     """ResNet18."""
 
-    def __init__(
-        self,
-        bn_config: Mapping[str, float] | None = None,
-        use_bn: bool = None,
-        pad_crop: bool = False,
-        n_output_channels: int = 1,
-        name: str | None = None,
-    ):
-        """Constructs a ResNet model.
-        Args:
-          bn_config: A dictionary of two elements, ``decay_rate`` and ``eps`` to be
-            passed on to the :class:`~haiku.BatchNorm` layers.
-          resnet_v2: Whether to use the v1 or v2 ResNet implementation. Defaults
-            to ``False``.
-          use_bn: Whether the network should use batch normalisation. Defaults to
-            ``True``.
-          n_output_channels: The number of output channels, for example to change in
-            the case of a complex denoising. Defaults to 1.
-          name: Name of the module.
-        """
-        super().__init__(
-            blocks_per_group=(2, 2),
-            bn_config=bn_config,
-            bottleneck=False,
-            channels_per_group=(4, 8),
-            use_projection=(True, True),
-            strides=(2, 1),
-            use_bn=use_bn,
-            pad_crop=pad_crop,
-            n_output_channels=n_output_channels,
-            name=name,
-        )
+#     def __init__(
+#         self,
+#         bn_config: Mapping[str, float] | None = None,
+#         use_bn: bool = None,
+#         pad_crop: bool = False,
+#         n_output_channels: int = 1,
+#         name: str | None = None,
+#     ):
+#         """Constructs a ResNet model.
+#         Args:
+#           bn_config: A dictionary of two elements, ``decay_rate`` and ``eps`` to be
+#             passed on to the :class:`~haiku.BatchNorm` layers.
+#           resnet_v2: Whether to use the v1 or v2 ResNet implementation. Defaults
+#             to ``False``.
+#           use_bn: Whether the network should use batch normalisation. Defaults to
+#             ``True``.
+#           n_output_channels: The number of output channels, for example to change in
+#             the case of a complex denoising. Defaults to 1.
+#           name: Name of the module.
+#         """
+#         super().__init__(
+#             blocks_per_group=(2, 2),
+#             bn_config=bn_config,
+#             bottleneck=False,
+#             channels_per_group=(4, 8),
+#             use_projection=(True, True),
+#             strides=(2, 1),
+#             use_bn=use_bn,
+#             pad_crop=pad_crop,
+#             n_output_channels=n_output_channels,
+#             name=name,
+#         )
+
+class UResNetEncoder(hk.Module):
+    def __init__(self, n_output_channels):
+        super().__init__()
+        self.n_output_channels = n_output_channels
+
+    def __call__(self, x):
+        residual = hk.Conv2D(1, 3, 1)(x)
+        return (residual + x).squeeze()
+
 
 class ConvDecoder(hk.Module):
     def __init__(self, output_dim):
@@ -286,15 +296,15 @@ class ConvDecoder(hk.Module):
 
 encoder = hk.without_apply_rng(
     hk.transform_with_state(
-        lambda x: UResNetEncoder(n_output_channels=2, name="encoder")(
-            x.reshape([-1, N, N, 1]), condition=None, is_training=True
+        lambda x: UResNetEncoder(n_output_channels=2)(
+            x.reshape([-1, N, N, 1])
         )
     )
 )
 encoder_eval = hk.without_apply_rng(
     hk.transform_with_state(
-        lambda x: UResNetEncoder(n_output_channels=2, name="encoder")(
-            x.reshape([-1, N, N, 1]), condition=None, is_training=False
+        lambda x: UResNetEncoder(n_output_channels=2)(
+            x.reshape([-1, N, N, 1])
         )
     )
 )
@@ -330,7 +340,7 @@ print("######## ELBO LOSS FUNCTION ########")
 @jax.jit
 def posterior_z(y):
     return tfd.MultivariateNormalDiag(
-        loc=y[..., 0].flatten(),
+        loc=y.flatten(),
         # scale_diag=tfb.Softplus(low=1e-8).forward(y[..., 1].flatten() + 1e-3),
         scale_diag=jnp.ones([N,N]).flatten()* 1e-8,
     )
