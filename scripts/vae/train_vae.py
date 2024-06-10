@@ -43,7 +43,7 @@ parser.add_argument("--lr_rate", type=float, default=1e-2)
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new32"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new33"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -433,7 +433,7 @@ store_logp_z_train = []
 store_logp_x_test = []
 store_logp_x_train = []
 master_seed = jax.random.PRNGKey(0)
-weight = 0
+weight = 1
 
 for batch in tqdm(range(1, args.total_steps)):
     master_seed, rng = jax.random.split(master_seed, 2)
