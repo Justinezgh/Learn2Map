@@ -36,14 +36,14 @@ np.complex = complex
 
 # script arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--total_steps", type=int, default=20_000)
+parser.add_argument("--total_steps", type=int, default=100_000)
 parser.add_argument("--lr_rate", type=float, default=1e-2)
 
 
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new33"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new34"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -399,16 +399,23 @@ def update(model_params, opt_state, state, x, rng, weight):
 
 
 total_steps = 15_000
-lr_scheduler = optax.piecewise_constant_schedule(
-    init_value=args.lr_rate,
-    boundaries_and_scales={
-        int(total_steps * 0.1): 0.6,
-        int(total_steps * 0.3): 0.5,
-        int(total_steps * 0.5): 0.4,
-        int(total_steps * 0.7): 0.3,
-        int(total_steps * 0.9): 0.1,
-    },
+# lr_scheduler = optax.piecewise_constant_schedule(
+#     init_value=args.lr_rate,
+#     boundaries_and_scales={
+#         int(total_steps * 0.1): 0.6,
+#         int(total_steps * 0.3): 0.5,
+#         int(total_steps * 0.5): 0.4,
+#         int(total_steps * 0.7): 0.3,
+#         int(total_steps * 0.9): 0.1,
+#     },
+# )
+lr_scheduler = optax.exponential_decay(
+    init_value=0.001,
+    transition_steps=2_000,
+    decay_rate=0.9,
+    end_value=1e-5,
 )
+
 ds_tr = tfds.load("CosmogridGridFiducialDataset/fiducial", split="train")
 
 ds_tr = ds_tr.repeat()
