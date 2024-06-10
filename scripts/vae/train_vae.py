@@ -43,7 +43,7 @@ parser.add_argument("--lr_rate", type=float, default=1e-2)
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new31"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new32"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -331,8 +331,8 @@ print("######## ELBO LOSS FUNCTION ########")
 def posterior_z(y):
     return tfd.MultivariateNormalDiag(
         loc=y[..., 0].flatten(),
-        # scale_diag=tfb.Softplus(low=1e-8).forward(y[..., 1].flatten() + 1e-3),
-        scale_diag=jnp.ones([N,N]).flatten()* 1e-8,
+        scale_diag=tfb.Softplus(low=1e-8).forward(y[..., 1].flatten() + 1e-3),
+        # scale_diag=jnp.ones([N,N]).flatten()* 1e-8,
     )
 
 
