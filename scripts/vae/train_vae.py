@@ -36,14 +36,14 @@ np.complex = complex
 
 # script arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("--total_steps", type=int, default=100_000)
+parser.add_argument("--total_steps", type=int, default=50_000)
 parser.add_argument("--lr_rate", type=float, default=1e-2)
 
 
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new34"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new35"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -398,7 +398,7 @@ def update(model_params, opt_state, state, x, rng, weight):
     return loss, new_params, new_opt_state, state[0], state[1]
 
 
-total_steps = 15_000
+# total_steps = 15_000
 # lr_scheduler = optax.piecewise_constant_schedule(
 #     init_value=args.lr_rate,
 #     boundaries_and_scales={
@@ -415,6 +415,14 @@ lr_scheduler = optax.exponential_decay(
     decay_rate=0.9,
     end_value=1e-5,
 )
+
+lr_scheduler_dkl = optax.exponential_decay(
+    init_value=0.9,
+    transition_steps=1_000,
+    decay_rate=0.9,
+    end_value=1e-6
+)
+
 
 ds_tr = tfds.load("CosmogridGridFiducialDataset/fiducial", split="train")
 
@@ -440,12 +448,13 @@ store_logp_z_train = []
 store_logp_x_test = []
 store_logp_x_train = []
 master_seed = jax.random.PRNGKey(0)
-weight = 1
+
 
 for batch in tqdm(range(1, args.total_steps)):
     master_seed, rng = jax.random.split(master_seed, 2)
     ex = next(ds_train)
     x = ex["maps"].squeeze()
+    weight = 1 - lr_scheduler_dkl(batch)
     b_loss, vae_params, opt_state, state, logp = update(
         vae_params, opt_state, state, x, rng, weight
     )
@@ -508,6 +517,7 @@ for batch in tqdm(range(1, args.total_steps)):
 
         # check overfitting
         inds = np.random.randint(0, len(dataset_test), 128)
+        weight = 1 - lr_scheduler_dkl(batch)
         b_loss_test, _, _, _, logp_test = update(
             vae_params, opt_state, state, dataset_test[inds], rng, weight
         )
