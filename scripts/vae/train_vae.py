@@ -43,7 +43,7 @@ parser.add_argument("--lr_rate", type=float, default=1e-2)
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new35"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new41"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -51,7 +51,7 @@ os.makedirs(f"./save_params/{PATH_experiment}")
 print("######## CONFIG ########")
 
 sigma_e = 0.26
-galaxy_density = gal_per_arcmin2 = 10 / 4
+galaxy_density = gal_per_arcmin2 = 10
 field_size = map_size = size = 10
 field_npix = N = xsize = 80
 nside = 512
@@ -352,7 +352,7 @@ def log_posterior_x(y, x):
     return posterior_x(y).log_prob(x)
 
 
-def compute_elbo(x, rng, M, state, params, weight):
+def compute_elbo(x, rng, M, state, params, weight_dkl, weight_nll):
     state_encoder, state_decoder = state
 
     output_encoder, state_encoder = encoder.apply(
@@ -369,17 +369,17 @@ def compute_elbo(x, rng, M, state, params, weight):
     )(z.reshape([M, N, N]))
     logp_x = jax.vmap(lambda y: log_posterior_x(y, x))(output_decoder.squeeze())
 
-    return jnp.mean(logp_x - weight * (logp_z - log_prior)), (
+    return jnp.mean(weight_nll * logp_x - weight_dkl * (logp_z - log_prior)), (
         (state_encoder, state_decoder),
         (jnp.mean(-logp_x), jnp.mean(logp_z - log_prior)),
     )
 
 
-def loss_elbo(params, state, x, rng, weight):
+def loss_elbo(params, state, x, rng, weight_dkl, weight_nll):
     M = 20
     rng = jax.random.split(rng, len(x))
     elbo, state = jax.vmap(
-        lambda x, rng: compute_elbo(x, rng, M, state, params, weight)
+        lambda x, rng: compute_elbo(x, rng, M, state, params, weight_dkl, weight_nll)
     )(x, rng)
 
     return jnp.mean(-elbo), state
@@ -389,9 +389,9 @@ print("######## TRAINING ########")
 
 
 @jax.jit
-def update(model_params, opt_state, state, x, rng, weight):
+def update(model_params, opt_state, state, x, rng, weight_dkl, weight_nll):
     (loss, state), grads = jax.value_and_grad(loss_elbo, has_aux=True)(
-        model_params, state, x, rng, weight
+        model_params, state, x, rng, weight_dkl, weight_nll
     )
     updates, new_opt_state = optimizer.update(grads, opt_state)
     new_params = optax.apply_updates(model_params, updates)
@@ -417,6 +417,13 @@ lr_scheduler = optax.exponential_decay(
 )
 
 lr_scheduler_dkl = optax.exponential_decay(
+    init_value=0.9,
+    transition_steps=1_000,
+    decay_rate=0.9,
+    end_value=1e-6
+)
+
+lr_scheduler_nll = optax.exponential_decay(
     init_value=0.9,
     transition_steps=1_000,
     decay_rate=0.9,
@@ -454,9 +461,10 @@ for batch in tqdm(range(1, args.total_steps)):
     master_seed, rng = jax.random.split(master_seed, 2)
     ex = next(ds_train)
     x = ex["maps"].squeeze()
-    weight = 1 - lr_scheduler_dkl(batch)
+    weight_dkl = 1#1 - lr_scheduler_dkl(batch)
+    weight_nll = 1 #- lr_scheduler_nll(batch)
     b_loss, vae_params, opt_state, state, logp = update(
-        vae_params, opt_state, state, x, rng, weight
+        vae_params, opt_state, state, x, rng, weight_dkl, weight_nll
     )
     
     if jnp.isnan(b_loss):
@@ -517,9 +525,10 @@ for batch in tqdm(range(1, args.total_steps)):
 
         # check overfitting
         inds = np.random.randint(0, len(dataset_test), 128)
-        weight = 1 - lr_scheduler_dkl(batch)
+        weight_dkl = 1#1 - lr_scheduler_dkl(batch)
+        weight_nll = 1 #- lr_scheduler_nll(batch)
         b_loss_test, _, _, _, logp_test = update(
-            vae_params, opt_state, state, dataset_test[inds], rng, weight
+            vae_params, opt_state, state, dataset_test[inds], rng, weight_dkl, weight_nll
         )
         store_loss_test.append(b_loss_test)
         store_logp_z_test.append(logp_test[1])
