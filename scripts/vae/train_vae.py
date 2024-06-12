@@ -240,11 +240,11 @@ class UResNetEncoder(UResNet):
 
     def __init__(
         self,
-        bn_config: Mapping[str, float] | None = None,
-        use_bn: bool = None,
-        pad_crop: bool = False,
-        n_output_channels: int = 1,
-        name: str | None = None,
+        bn_config = None,
+        use_bn = True,
+        pad_crop = False,
+        n_output_channels = 1,
+        name    = None,
     ):
         """Constructs a ResNet model.
         Args:
@@ -330,9 +330,9 @@ print("######## ELBO LOSS FUNCTION ########")
 @jax.jit
 def posterior_z(y):
     return tfd.MultivariateNormalDiag(
-        loc=y[..., 0].flatten(),
-        scale_diag=tfb.Softplus(low=1e-8).forward(y[..., 1].flatten() + 1e-3),
-        # scale_diag=jnp.ones([N,N]).flatten()* 1e-8,
+        loc=y[..., 0],
+        scale_diag=tfb.Softplus(low=1e-8).forward(y[..., 1] + 1e-3),
+        
     )
 
 
@@ -351,38 +351,46 @@ def posterior_x(y):
 def log_posterior_x(y, x):
     return posterior_x(y).log_prob(x)
 
+def loss_elbo(params, state, x, rng, weight_dkl, weight_nll):
+    M = 20
 
-def compute_elbo(x, rng, M, state, params, weight_dkl, weight_nll):
     state_encoder, state_decoder = state
 
+    print("checking dimensions")
+    # Encode
+    print("x.shape", x.shape)
     output_encoder, state_encoder = encoder.apply(
-        params, state_encoder, x.reshape([1, N, N, 1])
+        params, state_encoder, x.reshape([-1, N, N, 1])
     )
+    print("output_encoder.shape", output_encoder.shape)
 
+    # Sample code
     p_z = posterior_z(output_encoder)
     z = p_z.sample(M, seed=rng)
-    logp_z = p_z.log_prob(z)
-    log_prior = jax.vmap(log_gaussian_prior)(z.reshape([M, N, N]))
+    print("z.shape", z.shape)
+    logp_z = p_z.log_prob(z).sum(-1)
+    print("logp_z.shape", logp_z.shape)
+    log_prior = jax.vmap(log_gaussian_prior)(z.reshape([-1, N, N])).reshape([M, -1])
+    print("log_prior.shape", log_prior.shape)
 
+    # Decode
     output_decoder, state_decoder = jax.vmap(
-        lambda z: decoder.apply(params, state_decoder, z.reshape([1, N, N, 1]))
-    )(z.reshape([M, N, N]))
-    logp_x = jax.vmap(lambda y: log_posterior_x(y, x))(output_decoder.squeeze())
+        decoder.apply,
+        in_axes=(None, None, 0),
+        out_axes=(0,None))(params, state_decoder, z)
+    
+    print("output_decoder.shape", output_decoder.shape)
+    
+    logp_x = jax.vmap(log_posterior_x, in_axes=(0, None))(output_decoder, x)
+    print("logp_x.shape", logp_x.shape)
 
-    return jnp.mean(weight_nll * logp_x - weight_dkl * (logp_z - log_prior)), (
-        (state_encoder, state_decoder),
+    elbo = (weight_nll * logp_x - weight_dkl * (logp_z - log_prior)).mean()
+    print("loss shape", elbo.shape)
+
+    return -elbo, ((state_encoder, state_decoder),
         (jnp.mean(-logp_x), jnp.mean(logp_z - log_prior)),
     )
 
-
-def loss_elbo(params, state, x, rng, weight_dkl, weight_nll):
-    M = 20
-    rng = jax.random.split(rng, len(x))
-    elbo, state = jax.vmap(
-        lambda x, rng: compute_elbo(x, rng, M, state, params, weight_dkl, weight_nll)
-    )(x, rng)
-
-    return jnp.mean(-elbo), state
 
 
 print("######## TRAINING ########")
