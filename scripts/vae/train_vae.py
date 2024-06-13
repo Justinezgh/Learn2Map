@@ -43,7 +43,7 @@ parser.add_argument("--lr_rate", type=float, default=1e-2)
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new41"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new45"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -129,7 +129,7 @@ cosmo_fid = jc.Planck15(
 
 
 def Pk_fn(k, cosmo, a_ai=None):
-    pz = smail_nz2(3.53, 4.49, 1.03, gals_per_arcmin2=10 / 4)
+    pz = smail_nz2(3.53, 4.49, 1.03, gals_per_arcmin2=galaxy_density)
     tracer = jc.probes.WeakLensing([pz], ia_bias=a_ai)
     ell_tab = jnp.logspace(0, 4.5, 128)
     cell_tab = jc.angular_cl.angular_cl(cosmo, ell_tab, [tracer])[0]
@@ -506,30 +506,30 @@ for batch in tqdm(range(1, args.total_steps)):
         plt.title("Batch Loss")
         plt.savefig(f"./fig/{PATH_experiment}/loss_vae")
 
-        plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_z[1000:]),axis =1))
-        plt.title("logp_z")
-        plt.savefig(f"./fig/{PATH_experiment}/loss_dkl")
+        # plt.figure()
+        # plt.plot(jnp.mean(jnp.array(store_logp_z[1000:]),axis =1))
+        # plt.title("logp_z")
+        # plt.savefig(f"./fig/{PATH_experiment}/loss_dkl")
 
-        plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_x[1000:]),axis =1))
-        plt.title("logp_x")
-        plt.savefig(f"./fig/{PATH_experiment}/loss_likelihood")
+        # plt.figure()
+        # plt.plot(jnp.mean(jnp.array(store_logp_x[1000:]),axis =1))
+        # plt.title("logp_x")
+        # plt.savefig(f"./fig/{PATH_experiment}/loss_likelihood")
 
         plt.figure()
         plt.plot(store_loss[int(batch - 2000) :])
         plt.title("Zoom batch Loss")
         plt.savefig(f"./fig/{PATH_experiment}/zoomloss_vae")
 
-        plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_z[int(batch - 2000) :]), axis = 1))
-        plt.title("zoom logp_z")
-        plt.savefig(f"./fig/{PATH_experiment}/zoomloss_dkl")
+        # plt.figure()
+        # plt.plot(jnp.mean(jnp.array(store_logp_z[int(batch - 2000) :]), axis = 1))
+        # plt.title("zoom logp_z")
+        # plt.savefig(f"./fig/{PATH_experiment}/zoomloss_dkl")
 
-        plt.figure()
-        plt.plot(jnp.mean(jnp.array(store_logp_x[int(batch - 2000) :]), axis = 1))
-        plt.title("zoom logp_x")
-        plt.savefig(f"./fig/{PATH_experiment}/zoomloss_likelihood")
+        # plt.figure()
+        # plt.plot(jnp.mean(jnp.array(store_logp_x[int(batch - 2000) :]), axis = 1))
+        # plt.title("zoom logp_x")
+        # plt.savefig(f"./fig/{PATH_experiment}/zoomloss_likelihood")
 
         # check overfitting
         inds = np.random.randint(0, len(dataset_test), 128)
