@@ -43,7 +43,7 @@ parser.add_argument("--lr_rate", type=float, default=1e-2)
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new46"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new49"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -275,9 +275,11 @@ class ConvDecoder(hk.Module):
     def __init__(self, output_dim):
         super().__init__()
         self.output_dim = output_dim
-
+        
     def __call__(self, x):
         residual = hk.Conv2D(1, 3, 1)(x)
+        residual = jax.nn.leaky_relu(residual)
+        residual = hk.Conv2D(1, 3, 1)(residual) 
         residual = jax.nn.leaky_relu(residual)
         residual = hk.Conv2D(1, 3, 1)(residual)
         return (residual + x).squeeze()
