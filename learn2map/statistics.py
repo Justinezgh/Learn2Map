@@ -11,7 +11,7 @@ def power_spectrum(data, map_size, l_edges=np.arange(60.0, 2000.0, 15.0)):
 def peak_counts(data, map_size, thresholds = None):
     map = ConvergenceMap(data, angle=map_size*u.deg)
     if thresholds is None:
-        thresholds = np.arange(map.data.min(),map.data.max(),0.05)
+        thresholds = np.arange(map.data.min(),map.data.max(),0.005)
     nu, peaks = map.peakCount(thresholds)
 
     return nu, peaks
@@ -25,7 +25,7 @@ def minkowski_functionals(data, map_size, thresholds=np.arange(-2.0,2.0,0.2)):
 def pdf(data, map_size, thresholds=None):
     map = ConvergenceMap(data, angle=map_size*u.deg)
     if thresholds is None:
-        thresholds = np.arange(map.data.min(),map.data.max(),0.05)
+        thresholds = np.arange(map.data.min(),map.data.max(),0.005)
     nu,p = map.pdf(thresholds)
 
     return nu, p
