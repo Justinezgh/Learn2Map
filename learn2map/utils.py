@@ -1,5 +1,5 @@
+import math
 import jax.numpy as jnp
-import numpy as np
 
 def radial_profile(power_spectrum_2d):
     """
@@ -11,9 +11,10 @@ def radial_profile(power_spectrum_2d):
     v, u = jnp.indices((power_spectrum_2d.shape))
     k = jnp.sqrt((u - center)**2 + (v - center)**2)
     k = k.astype('int32')
-
-    tbin = jnp.bincount(k.ravel(), power_spectrum_2d.ravel())
-    nr = jnp.bincount(k.ravel())
+    
+    length = int(math.sqrt(2*(power_spectrum_2d.shape[0]/2)**2))+1
+    tbin = jnp.bincount(k.ravel(), power_spectrum_2d.ravel(), length=length)
+    nr = jnp.bincount(k.ravel(), length=length)  
     radialprofile = tbin / nr
     return radialprofile
 
@@ -34,13 +35,13 @@ def measure_power_spectrum(map_data, zero_freq_val=1e-2):
 
 def make_ps_map(power_spectrum, size, kps=None, zero_freq_val=1e7):
   #Ok we need to make a map of the power spectrum in Fourier space
-  k1 = np.fft.fftfreq(size)
-  k2 = np.fft.fftfreq(size)
-  kcoords = np.meshgrid(k1,k2)
+  k1 = jnp.fft.fftfreq(size)
+  k2 = jnp.fft.fftfreq(size)
+  kcoords = jnp.meshgrid(k1,k2)
   # Now we can compute the k vector
-  k = np.sqrt(kcoords[0]**2 + kcoords[1]**2)
+  k = jnp.sqrt(kcoords[0]**2 + kcoords[1]**2)
   if kps is None:
-    kps = np.linspace(0,0.5,len(power_spectrum))
+    kps = jnp.linspace(0,0.5,len(power_spectrum))
   # And we can interpolate the PS at these positions
   ps_map = jnp.interp(k.flatten(), kps, power_spectrum).reshape([size,size])
   ps_map = ps_map.at[0,0].set(zero_freq_val)
