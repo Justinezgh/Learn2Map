@@ -32,12 +32,16 @@ class DatasetConfig(tfds.core.BuilderConfig):
         *,
         xsize,
         size,
+        baryon,
+        ia,
         **kwargs,
     ):
         v1 = tfds.core.Version("0.0.1")
         super().__init__(description=("Cosmogrid simulations."), version=v1, **kwargs)
         self.xsize = xsize
         self.size = size
+        self.baryon = baryon
+        self.ia = ia
 
 
 class CosmogridGridFiducialDataset(tfds.core.GeneratorBasedBuilder):
@@ -49,9 +53,18 @@ class CosmogridGridFiducialDataset(tfds.core.GeneratorBasedBuilder):
     }
     BUILDER_CONFIGS = [
         DatasetConfig(
-            name="fiducial",
+            name="fiducial",  # nbody and baryon and ia
             xsize=80,
             size=10,
+            baryon=True,
+            ia=True,
+        ),
+        DatasetConfig(
+            name="fiducial_nbody",  # nbody without baryon and ia
+            xsize=80,
+            size=10,
+            baryon=False,
+            ia=False,
         ),
     ]
 
@@ -127,13 +140,22 @@ class CosmogridGridFiducialDataset(tfds.core.GeneratorBasedBuilder):
                 and (item != "perm_0002")
             ):
                 filename = path_string + item
-                filename_baryon = filename + "/projected_probes_maps_baryonified512.h5"
-                sim_with_baryon = h5py.File(filename_baryon, "r")
+                if self.builder_config.baryon:
+                    filename_simulation = (
+                        filename + "/projected_probes_maps_baryonified512.h5"
+                    )
+                else:
+                    filename_simulation = (
+                        filename + "/projected_probes_maps_nobaryons512.h5"
+                    )
 
+                simulation = h5py.File(filename_simulation, "r")
                 # keeping only last tomo bins
-                nbody_map_with_baryon_and_ia = np.array(
-                    sim_with_baryon["kg"][f"stage3_lensing{4}"]
-                ) + np.array(sim_with_baryon["ia"][f"stage3_lensing{4}"])
+                nbody_map = np.array(simulation["kg"][f"stage3_lensing{4}"])
+
+                if self.builder_config.ia:
+                    nbody_map += np.array(simulation["ia"][f"stage3_lensing{4}"])
+
                 # projection
                 key1, key2 = jax.random.split(key)
                 lon = jax.random.randint(key1, (nb_of_projected_map,), -180, 180)
@@ -143,8 +165,7 @@ class CosmogridGridFiducialDataset(tfds.core.GeneratorBasedBuilder):
                         rot=[lon[k], lat[k], 0], xsize=xsize, ysize=xsize, reso=reso
                     )
                     projection_nbody = proj.projmap(
-                        nbody_map_with_baryon_and_ia,
-                        vec2pix_func=partial(hp.vec2pix, nside),
+                        nbody_map, vec2pix_func=partial(hp.vec2pix, nside)
                     )
                     yield f"{filename}-{k}", {
                         "map_nbody": jnp.array(projection_nbody).squeeze(),

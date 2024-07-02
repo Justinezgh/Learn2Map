@@ -69,6 +69,20 @@ class CosmogridGridDataset(tfds.core.GeneratorBasedBuilder):
                         ],
                         dtype=tf.float32,
                     ),
+                    "map_nbody_w_baryon": tfds.features.Tensor(
+                        shape=[
+                            self.builder_config.xsize,
+                            self.builder_config.xsize,
+                        ],
+                        dtype=tf.float32,
+                    ),
+                    "map_nbody_w_ia": tfds.features.Tensor(
+                        shape=[
+                            self.builder_config.xsize,
+                            self.builder_config.xsize,
+                        ],
+                        dtype=tf.float32,
+                    ),
                     "map_nbody": tfds.features.Tensor(
                         shape=[
                             self.builder_config.xsize,
@@ -139,7 +153,7 @@ class CosmogridGridDataset(tfds.core.GeneratorBasedBuilder):
         master_key = jax.random.PRNGKey(0)
 
         for i in range(start, end):
-            key, master_key = jax.random.split(master_key)
+            key, master_key, key2 = jax.random.split(master_key, 3)
             params = cosmo_parameters[i]
             path_string = "/gpfsdswork/dataset/" + dataset_grid["path_par"][i].decode(
                 "utf-8"
@@ -154,19 +168,26 @@ class CosmogridGridDataset(tfds.core.GeneratorBasedBuilder):
                 sim_without_baryon = h5py.File(filename_withouth_baryon, "r")
 
                 # keeping only last tomo bins
-                nbody_map_without_baryon = np.array(
+                nbody_map = np.array(sim_without_baryon["kg"][f"stage3_lensing{4}"])
+                nbody_map_with_ia = np.array(
                     sim_without_baryon["kg"][f"stage3_lensing{4}"]
-                )
+                ) + np.array(sim_with_baryon["ia"][f"stage3_lensing{4}"])
                 nbody_map_with_baryon_and_ia = np.array(
                     sim_with_baryon["kg"][f"stage3_lensing{4}"]
                 ) + np.array(sim_with_baryon["ia"][f"stage3_lensing{4}"])
+                nbody_map_with_baryon = np.array(
+                    sim_with_baryon["kg"][f"stage3_lensing{4}"]
+                )
 
                 # building gaussian map
                 lmax = 3 * nside - 1
-                power_spectrum_nbody_map = hp.sphtfunc.anafast(
-                    nbody_map_without_baryon, lmax=lmax
-                )
+                power_spectrum_nbody_map = hp.sphtfunc.anafast(nbody_map, lmax=lmax)
                 z = np.random.randn(hp.nside2npix(nside)) * np.sqrt(scaling_factor)
+                z = jax.random.normal(key2, (hp.nside2npix(nside),)) * np.sqrt(
+                    scaling_factor
+                )
+                z = np.array(z)
+
                 power_spectrum_noise = hp.sphtfunc.anafast(z, lmax=lmax)
                 power_spectrum_target = power_spectrum_nbody_map / power_spectrum_noise
                 alm_hp = hp.map2alm(z, lmax=lmax)
@@ -181,22 +202,33 @@ class CosmogridGridDataset(tfds.core.GeneratorBasedBuilder):
                     proj = hp.projector.GnomonicProj(
                         rot=[lon[k], lat[k], 0], xsize=xsize, ysize=xsize, reso=reso
                     )
-                    projection_nbody_w_baryon_ia = proj.projmap(
+                    projection_nbody_map = proj.projmap(
+                        nbody_map, vec2pix_func=partial(hp.vec2pix, nside)
+                    )
+                    projection_nbody_map_with_ia = proj.projmap(
+                        nbody_map_with_ia, vec2pix_func=partial(hp.vec2pix, nside)
+                    )
+                    projection_nbody_map_with_baryon_and_ia = proj.projmap(
                         nbody_map_with_baryon_and_ia,
                         vec2pix_func=partial(hp.vec2pix, nside),
                     )
-                    projection_nbody = proj.projmap(
-                        nbody_map_without_baryon,
-                        vec2pix_func=partial(hp.vec2pix, nside),
+                    projection_nbody_map_with_baryon = proj.projmap(
+                        nbody_map_with_baryon, vec2pix_func=partial(hp.vec2pix, nside)
                     )
                     projection_gaussian = proj.projmap(
                         gaussian_map, vec2pix_func=partial(hp.vec2pix, nside)
                     )
                     yield f"{i}-{j}-{k}", {
                         "map_nbody_w_baryon_ia": jnp.array(
-                            projection_nbody_w_baryon_ia
+                            projection_nbody_map_with_baryon_and_ia
                         ).squeeze(),
-                        "map_nbody": jnp.array(projection_nbody).squeeze(),
+                        "map_nbody_w_baryon": jnp.array(
+                            projection_nbody_map_with_baryon
+                        ).squeeze(),
+                        "map_nbody_w_ia": jnp.array(
+                            projection_nbody_map_with_ia
+                        ).squeeze(),
+                        "map_nbody": jnp.array(projection_nbody_map).squeeze(),
                         "map_gaussian": jnp.array(projection_gaussian).squeeze(),
                         "theta": jnp.array(params),
                     }
