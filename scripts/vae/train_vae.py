@@ -23,6 +23,7 @@ from jax_cosmo.redshift import redshift_distribution
 from lenstools import ConvergenceMap
 from tqdm import tqdm
 from unet_model import UResNet
+from utils import measure_power_spectrum, make_ps_map
 
 tfp = tfp.substrates.jax
 tfd = tfp.distributions
@@ -43,15 +44,17 @@ parser.add_argument("--lr_rate", type=float, default=1e-2)
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new49"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new58"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
 
+is_baryon = False
+is_ia = False
 print("######## CONFIG ########")
 
 sigma_e = 0.26
-galaxy_density = gal_per_arcmin2 = 10
+galaxy_density = gal_per_arcmin2 = 10/4
 field_size = map_size = size = 10
 field_npix = N = xsize = 80
 nside = 512
@@ -64,6 +67,7 @@ scaling_factor = 1 / mean_pixel_area
 
 # Create our fiducial observations
 pix_area = (map_size * 60 / N) ** 2  # arcmin2
+pixel_width = jnp.sqrt(pix_area)
 map_size_rad = map_size / 180 * jnp.pi  # radians
 
 
@@ -83,11 +87,16 @@ cosmo_parameters = jnp.array(
 ).T
 truth = list(cosmo_parameters[0])
 
-path = "/gpfsdswork/dataset/CosmoGridV1/stage3_forecast/fiducial/cosmo_fiducial/perm_0000/projected_probes_maps_baryonified512.h5"
+if is_baryon:
+    path = "/gpfsdswork/dataset/CosmoGridV1/stage3_forecast/fiducial/cosmo_fiducial/perm_0000/projected_probes_maps_baryonified512.h5"
+else: 
+    path = "/gpfsdswork/dataset/CosmoGridV1/stage3_forecast/fiducial/cosmo_fiducial/perm_0000/projected_probes_maps_nobaryons512.h5"
+
 m_data = h5py.File(path, "r")
-m_data = np.array(m_data["kg"][f"stage3_lensing{4}"]) + np.array(
-    m_data["ia"][f"stage3_lensing{4}"]
-)
+m_data = np.array(m_data["kg"][f"stage3_lensing{4}"])
+if is_ia:
+    m_data += np.array(m_data["ia"][f"stage3_lensing{4}"])
+    
 proj = hp.projector.GnomonicProj(rot=[0, 0, 0], xsize=xsize, ysize=xsize, reso=reso)
 m_data_proj = proj.projmap(m_data, vec2pix_func=partial(hp.vec2pix, nside))
 m_data_proj_noisy = dist.Independent(
@@ -160,6 +169,11 @@ def log_gaussian_prior(map_data, ps_map=power_map, N=N):
 
 
 print("######## TEST DATASET ########")
+m_data = h5py.File(path, "r")
+m_data = np.array(m_data["kg"][f"stage3_lensing{4}"])
+if is_ia:
+    m_data += np.array(m_data["ia"][f"stage3_lensing{4}"])
+    
 path_string = "/gpfsdswork/dataset/CosmoGridV1/stage3_forecast/fiducial/cosmo_fiducial/"
 master_key = jax.random.PRNGKey(0)
 dataset_test = []
@@ -167,11 +181,14 @@ nb_of_projected_map = 400
 for i in range(3):
     key, master_key = jax.random.split(master_key)
     filename = path_string + f"perm_000{i}"
-    filename_baryon = filename + "/projected_probes_maps_baryonified512.h5"
+    if is_baryon:
+        filename_baryon = filename + "/projected_probes_maps_baryonified512.h5"
+    else: 
+        filename_baryon = filename + "/projected_probes_maps_nobaryons512.h5"
     sim_with_baryon = h5py.File(filename_baryon, "r")
-    nbody_map_with_baryon_and_ia = np.array(
-        sim_with_baryon["kg"][f"stage3_lensing{4}"]
-    ) + np.array(sim_with_baryon["ia"][f"stage3_lensing{4}"])
+    nbody_map_with_baryon_and_ia = np.array(sim_with_baryon["kg"][f"stage3_lensing{4}"])
+    if is_ia:
+        nbody_map_with_baryon_and_ia += np.array(nbody_map_with_baryon_and_ia["ia"][f"stage3_lensing{4}"])
     # projection
     key1, key2 = jax.random.split(key)
     lon = jax.random.randint(key1, (nb_of_projected_map,), -180, 180)
@@ -209,6 +226,10 @@ def augmentation_flip(example):
     x = tf.image.random_flip_up_down(x)
     return {"maps": x, "theta": example["theta"]}
 
+def mean_to_zero(example):
+    x = example["map_nbody"]
+    x = x - tf.reduce_mean(x)
+    return {"map_nbody": x, "theta": example["theta"]}
 
 def rescale_h(example):
     x = example["theta"]
@@ -216,12 +237,11 @@ def rescale_h(example):
     x = tf.tensor_scatter_nd_update(x, [[index_to_update]], [x[index_to_update] / 100])
     return {"maps": example["maps"], "theta": x}
 
-
 def augmentation(example):
     return rescale_h(
         augmentation_flip(
             augmentation_noise(
-                example=example,
+                example=mean_to_zero(example),
                 sigma_e=sigma_e,
                 galaxy_density=galaxy_density,
                 field_size=field_size,
@@ -232,7 +252,6 @@ def augmentation(example):
 
 
 print("######## CREATE VAE ########")
-
 
 # Unet from Benjamin Remy
 class UResNetEncoder(UResNet):
@@ -271,22 +290,38 @@ class UResNetEncoder(UResNet):
             name=name,
         )
 
+# does not take into account channel + if several tomo bin we have 
+# to change these fun to compute auto and cross power spectra
+@jax.jit
+@jax.vmap
+def normalize(map1, map2): 
+    map1 = map1.squeeze()
+    map2 = map2.squeeze()
+    ps_map1 = make_ps_map(measure_power_spectrum(map1), N)
+    ps_map2 = make_ps_map(measure_power_spectrum(map2), N)
+    cancel_ps = jnp.fft.fft2(map1) / (jnp.sqrt(ps_map1) + 1e-10)
+    apply_ps_map = jnp.fft.ifft2(cancel_ps * jnp.sqrt(ps_map2)).real
+    return apply_ps_map
+
 class ConvDecoder(hk.Module):
     def __init__(self, output_dim):
         super().__init__()
         self.output_dim = output_dim
         
     def __call__(self, x):
+        
         residual = hk.Conv2D(1, 3, 1)(x)
         residual = jax.nn.leaky_relu(residual)
         residual = hk.Conv2D(1, 3, 1)(residual) 
         residual = jax.nn.leaky_relu(residual)
         residual = hk.Conv2D(1, 3, 1)(residual)
-        return (residual + x).squeeze()
+
+        res = (residual + x)
+        
+        return normalize(res, x)
 
 
 # define decoder and encoder
-
 encoder = hk.without_apply_rng(
     hk.transform_with_state(
         lambda x: UResNetEncoder(n_output_channels=2, name="encoder")(
@@ -442,7 +477,10 @@ lr_scheduler_nll = optax.exponential_decay(
 )
 
 
-ds_tr = tfds.load("CosmogridGridFiducialDataset/fiducial", split="train")
+if is_ia and is_baryon: 
+    ds_tr = tfds.load("CosmogridGridFiducialDataset/fiducial", split="train")
+if (not is_ia) and (not is_baryon): 
+    ds_tr = tfds.load("CosmogridGridFiducialDataset/fiducial_nbody", split="train")
 
 ds_tr = ds_tr.repeat()
 ds_tr = ds_tr.shuffle(800)
