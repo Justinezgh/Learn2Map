@@ -47,3 +47,20 @@ def make_ps_map(power_spectrum, size, kps=None, zero_freq_val=1e7):
   ps_map = ps_map.at[0,0].set(zero_freq_val)
   
   return ps_map # Carefull, this is not fftshifted
+
+
+# from https://github.com/EiffL/LPTLensingComparison/blob/c4618d09b2b1df4b3b63799b304442f17bb709fd/jax_lensing/testf.py
+def filter_cut(ngrid, reso_rad, cut_off):
+    nsub = int(ngrid / 2 + 1)
+    i, j = jnp.meshgrid(jnp.arange(nsub), jnp.arange(nsub))
+    submatrix = 2 * jnp.pi * jnp.sqrt(i**2 + j**2) / reso_rad / jnp.float32(ngrid)
+
+    result = jnp.zeros([ngrid, ngrid])
+    result = result.at[0:nsub, 0:nsub].set(submatrix)
+    result = result.at[0:nsub, nsub:].set(jnp.fliplr(submatrix[:, 1:-1]))
+    result = result.at[nsub:, :].set(jnp.flipud(result[1:nsub-1, :]))
+    tmp = jnp.around(result).astype(int)
+
+    mask = jnp.ones_like(tmp)
+    mask = mask.at[tmp > cut_off].set(0)
+    return mask

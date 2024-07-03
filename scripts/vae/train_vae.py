@@ -23,7 +23,8 @@ from jax_cosmo.redshift import redshift_distribution
 from lenstools import ConvergenceMap
 from tqdm import tqdm
 from unet_model import UResNet
-from utils import measure_power_spectrum, make_ps_map
+from utils import measure_power_spectrum, make_ps_map, filter_cut
+import jax.numpy.fft as fft
 
 tfp = tfp.substrates.jax
 tfd = tfp.distributions
@@ -44,7 +45,7 @@ parser.add_argument("--lr_rate", type=float, default=1e-2)
 args = parser.parse_args()
 
 
-PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new58"
+PATH_experiment = f"{args.total_steps}_{args.lr_rate}_new62"
 os.makedirs(f"./fig/{PATH_experiment}")
 os.makedirs(f"./save_params/{PATH_experiment}")
 
@@ -56,7 +57,7 @@ print("######## CONFIG ########")
 sigma_e = 0.26
 galaxy_density = gal_per_arcmin2 = 10/4
 field_size = map_size = size = 10
-field_npix = N = xsize = 80
+field_npix = N = xsize = 86
 nside = 512
 reso = size * 60 / xsize
 nbins = 1
@@ -233,7 +234,6 @@ def augmentation_noise(
 
     return {"maps": x, "theta": example["theta"]}
 
-
 def augmentation_flip(example):
     x = tf.expand_dims(example["maps"], -1)
     x = tf.image.random_flip_left_right(x)
@@ -251,11 +251,21 @@ def rescale_h(example):
     x = tf.tensor_scatter_nd_update(x, [[index_to_update]], [x[index_to_update] / 100])
     return {"maps": example["maps"], "theta": x}
 
+def apply_filter(example): 
+    kmap = example["map_nbody"]
+    reso_rad = reso / 60 / 180 * np.pi
+    f = filter_cut(N, reso_rad, 1000)
+    kmap_fft = tf.signal.fft2d(tf.cast(kmap, tf.complex64))
+    f_fft = tf.cast(f, tf.complex64)
+    result = tf.signal.ifft2d(kmap_fft * f_fft)
+    resuls = tf.math.real(result)
+    return {"map_nbody": resuls, "theta": example["theta"]}
+
 def augmentation(example):
     return rescale_h(
         augmentation_flip(
             augmentation_noise(
-                example=mean_to_zero(example),
+                example=mean_to_zero(apply_filter(example)),
                 sigma_e=sigma_e,
                 galaxy_density=galaxy_density,
                 field_size=field_size,
@@ -264,6 +274,12 @@ def augmentation(example):
         )
     )
 
+# @jax.vmap
+# def apply_filter(kmap):
+#     reso_rad = reso / 60 / 180 * jnp.pi
+#     f = filter_cut(86, reso_rad, 1000)
+#     return fft.ifft2(fft.fft2(kmap)*f).real
+    
 
 print("######## CREATE VAE ########")
 
@@ -524,6 +540,7 @@ for batch in tqdm(range(1, args.total_steps)):
     master_seed, rng = jax.random.split(master_seed, 2)
     ex = next(ds_train)
     x = ex["maps"].squeeze()
+    # x = apply_filter(jnp.array(x))
     weight_dkl = 1#1 - lr_scheduler_dkl(batch)
     weight_nll = 1 #- lr_scheduler_nll(batch)
     b_loss, vae_params, opt_state, state, logp = update(
@@ -590,6 +607,7 @@ for batch in tqdm(range(1, args.total_steps)):
         inds = np.random.randint(0, len(dataset_test), 128)
         weight_dkl = 1#1 - lr_scheduler_dkl(batch)
         weight_nll = 1 #- lr_scheduler_nll(batch)
+        # dataset_test_filtered = apply_filter(dataset_test[inds])
         b_loss_test, _, _, _, logp_test = update(
             vae_params, opt_state, state, dataset_test[inds], rng, weight_dkl, weight_nll
         )
