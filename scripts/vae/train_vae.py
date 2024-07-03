@@ -64,6 +64,7 @@ dim = 6
 nside = 512
 mean_pixel_area = 4 * np.pi / hp.nside2npix(nside)
 scaling_factor = 1 / mean_pixel_area
+lmax = 3*nside - 1
 
 # Create our fiducial observations
 pix_area = (map_size * 60 / N) ** 2  # arcmin2
@@ -143,14 +144,18 @@ pixel_window = jnp.array(hp.sphtfunc.pixwin(nside=nside), dtype='float32')
 def pixel_window_fn(ell):
     return pixel_window[ell.astype('int32')]
 
-def Pk_fn(k, cosmo, a_ai=None, pixel_window=True):
+def scale_cut_fn(ell, ell_cut=1000):
+    return jnp.ones(lmax+1)[ell.astype('int32')].at[jnp.where(ell>ell_cut)].set(0)
+
+def Pk_fn(k, cosmo, a_ai=None, pixel_window=True, scale_cut=1000):
     pz = smail_nz2(3.53, 4.49, 1.03, gals_per_arcmin2=galaxy_density)
     tracer = jc.probes.WeakLensing([pz], ia_bias=a_ai)
     ell_tab = jnp.logspace(0, 4.5, 128)
     cell_tab = jc.angular_cl.angular_cl(cosmo, ell_tab, [tracer])[0]
     if pixel_window is True:
         cell_tab *= pixel_window_fn(ell_tab)**2
-    
+    if scale_cut is not None:
+        cell_tab *= scale_cut_fn(ell_tab, scale_cut)
     return jc.scipy.interpolate.interp(k.flatten(), ell_tab, cell_tab).reshape(k.shape)
 
 
