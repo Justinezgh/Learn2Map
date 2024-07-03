@@ -99,6 +99,7 @@ if is_ia:
     
 proj = hp.projector.GnomonicProj(rot=[0, 0, 0], xsize=xsize, ysize=xsize, reso=reso)
 m_data_proj = proj.projmap(m_data, vec2pix_func=partial(hp.vec2pix, nside))
+m_data_proj = m_data_proj - m_data_proj.mean()
 m_data_proj_noisy = dist.Independent(
     dist.Normal(
         m_data_proj,
