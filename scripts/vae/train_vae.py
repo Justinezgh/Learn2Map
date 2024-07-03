@@ -111,7 +111,6 @@ m_data_proj_noisy = dist.Independent(
 
 print("######## DEFINING LATENT ANALYTICAL MODEL ########")
 
-
 from jax_cosmo.redshift import redshift_distribution
 from jax.tree_util import register_pytree_node_class
 
@@ -138,11 +137,20 @@ cosmo_fid = jc.Planck15(
 )
 
 
-def Pk_fn(k, cosmo, a_ai=None):
+# define the window function
+pixel_window = jnp.array(hp.sphtfunc.pixwin(nside=nside), dtype='float32')
+
+def pixel_window_fn(ell):
+    return pixel_window[ell.astype('int32')]
+
+def Pk_fn(k, cosmo, a_ai=None, pixel_window=True):
     pz = smail_nz2(3.53, 4.49, 1.03, gals_per_arcmin2=galaxy_density)
     tracer = jc.probes.WeakLensing([pz], ia_bias=a_ai)
     ell_tab = jnp.logspace(0, 4.5, 128)
     cell_tab = jc.angular_cl.angular_cl(cosmo, ell_tab, [tracer])[0]
+    if pixel_window is True:
+        cell_tab *= pixel_window_fn(ell_tab)**2
+    
     return jc.scipy.interpolate.interp(k.flatten(), ell_tab, cell_tab).reshape(k.shape)
 
 
